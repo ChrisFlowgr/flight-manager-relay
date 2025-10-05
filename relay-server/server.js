@@ -65,12 +65,17 @@ wss.on('connection', (ws) => {
 
         const room = rooms.get(roomCode);
 
+        // If there's already a mobile connection, close it first (reconnection)
         if (room.mobile) {
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: 'Room already has a mobile device connected'
-          }));
-          return;
+          console.log(`Replacing existing mobile connection in room ${roomCode}`);
+          try {
+            if (room.mobile.readyState === WebSocket.OPEN) {
+              room.mobile.close();
+            }
+          } catch (e) {
+            console.error('Error closing old mobile connection:', e);
+          }
+          room.mobile = null;
         }
 
         currentRoom = roomCode;
