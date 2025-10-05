@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd relay-server && npm install"
+
+[deploy]
+startCommand = "cd relay-server && npm start"
+restartPolicyType = "on_failure"
