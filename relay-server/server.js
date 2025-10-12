@@ -10,8 +10,11 @@ app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Store active rooms: { roomCode: { pc: WebSocket, mobile: WebSocket } }
+// Store active rooms: { roomCode: { pc: WebSocket, mobile: WebSocket, reconnectionToken: string, createdAt: Date } }
 const rooms = new Map();
+
+// Store reconnection tokens: { token: roomCode }
+const reconnectionTokens = new Map();
 
 // Generate random 6-character room code
 function generateRoomCode() {
@@ -21,6 +24,11 @@ function generateRoomCode() {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;
+}
+
+// Generate reconnection token (longer, more secure)
+function generateReconnectionToken() {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 
 // WebSocket connection handler
@@ -36,19 +44,70 @@ wss.on('connection', (ws) => {
 
       // Handle PC server registration
       if (data.type === 'register_pc') {
-        const roomCode = generateRoomCode();
+        let roomCode;
+        let reconnectionToken;
+        let isReconnection = false;
+
+        // Check if PC is attempting reconnection with existing token
+        if (data.reconnectionToken && data.requestedRoomCode) {
+          const storedRoomCode = reconnectionTokens.get(data.reconnectionToken);
+
+          // If token is valid and room still exists, reuse it
+          if (storedRoomCode === data.requestedRoomCode && rooms.has(storedRoomCode)) {
+            const existingRoom = rooms.get(storedRoomCode);
+
+            // Cancel cleanup timeout if reconnecting
+            if (existingRoom.cleanupTimeout) {
+              clearTimeout(existingRoom.cleanupTimeout);
+              delete existingRoom.cleanupTimeout;
+            }
+
+            // Close old PC connection if exists
+            if (existingRoom.pc && existingRoom.pc.readyState === WebSocket.OPEN) {
+              try {
+                existingRoom.pc.close();
+              } catch (e) {
+                console.error('Error closing old PC connection:', e);
+              }
+            }
+
+            // Reuse the room and token
+            roomCode = storedRoomCode;
+            reconnectionToken = data.reconnectionToken;
+            existingRoom.pc = ws;
+            isReconnection = true;
+
+            console.log(`PC reconnected with existing room code: ${roomCode}`);
+          }
+        }
+
+        // If not reconnection, create new room
+        if (!roomCode) {
+          roomCode = generateRoomCode();
+          reconnectionToken = generateReconnectionToken();
+
+          rooms.set(roomCode, {
+            pc: ws,
+            mobile: null,
+            reconnectionToken: reconnectionToken,
+            createdAt: new Date()
+          });
+
+          reconnectionTokens.set(reconnectionToken, roomCode);
+
+          console.log(`PC registered with new room code: ${roomCode}`);
+        }
+
         currentRoom = roomCode;
         deviceType = 'pc';
-
-        rooms.set(roomCode, { pc: ws, mobile: null });
 
         ws.send(JSON.stringify({
           type: 'registered',
           roomCode: roomCode,
+          reconnectionToken: reconnectionToken,
+          isReconnection: isReconnection,
           message: `PC registered with code: ${roomCode}`
         }));
-
-        console.log(`PC registered with room code: ${roomCode}`);
       }
 
       // Handle mobile app connection
@@ -150,9 +209,28 @@ wss.on('connection', (ws) => {
             message: 'PC disconnected'
           }));
         }
-        // Remove the room
-        rooms.delete(currentRoom);
-        console.log(`Room ${currentRoom} deleted (PC disconnected)`);
+
+        // Keep room and token for 1 hour to allow reconnection
+        // Set a timeout to cleanup later
+        const cleanupTimeout = setTimeout(() => {
+          if (rooms.has(currentRoom)) {
+            const room = rooms.get(currentRoom);
+
+            // Remove reconnection token
+            if (room.reconnectionToken) {
+              reconnectionTokens.delete(room.reconnectionToken);
+            }
+
+            // Remove the room
+            rooms.delete(currentRoom);
+            console.log(`Room ${currentRoom} cleaned up after timeout`);
+          }
+        }, 3600000); // 1 hour
+
+        // Store cleanup timeout in room for potential cancellation
+        room.cleanupTimeout = cleanupTimeout;
+
+        console.log(`PC disconnected from room ${currentRoom} (room kept for reconnection)`);
       } else if (deviceType === 'mobile') {
         // Just remove mobile from room
         room.mobile = null;
