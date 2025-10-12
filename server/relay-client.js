@@ -1,13 +1,49 @@
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
 
 class RelayClient {
   constructor(relayUrl) {
     this.relayUrl = relayUrl;
     this.ws = null;
     this.roomCode = null;
+    this.reconnectionToken = null;
     this.isConnected = false;
     this.messageHandlers = [];
     this.reconnectInterval = null;
+    this.configPath = path.join(__dirname, '.relay-config.json');
+
+    // Load saved room code and token if exists
+    this.loadSavedConfig();
+  }
+
+  // Load saved room code and reconnection token
+  loadSavedConfig() {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        const config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+        this.roomCode = config.roomCode;
+        this.reconnectionToken = config.reconnectionToken;
+        console.log(`📂 Loaded saved room code: ${this.roomCode}`);
+      }
+    } catch (error) {
+      console.error('Error loading saved config:', error.message);
+    }
+  }
+
+  // Save room code and reconnection token
+  saveConfig() {
+    try {
+      const config = {
+        roomCode: this.roomCode,
+        reconnectionToken: this.reconnectionToken,
+        lastSaved: new Date().toISOString()
+      };
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2));
+      console.log(`💾 Saved room code: ${this.roomCode}`);
+    } catch (error) {
+      console.error('Error saving config:', error.message);
+    }
   }
 
   // Connect to relay server and register as PC
@@ -20,10 +56,19 @@ class RelayClient {
         this.ws.on('open', () => {
           console.log('Connected to relay server');
 
-          // Register as PC
-          this.ws.send(JSON.stringify({
+          // Register as PC (with reconnection token if available)
+          const registrationMessage = {
             type: 'register_pc'
-          }));
+          };
+
+          // Include reconnection token if we have one (for reconnection with same code)
+          if (this.reconnectionToken) {
+            registrationMessage.reconnectionToken = this.reconnectionToken;
+            registrationMessage.requestedRoomCode = this.roomCode;
+            console.log(`🔄 Attempting to reconnect with saved room code: ${this.roomCode}`);
+          }
+
+          this.ws.send(JSON.stringify(registrationMessage));
         });
 
         this.ws.on('message', (data) => {
@@ -33,8 +78,16 @@ class RelayClient {
             // Handle registration response
             if (message.type === 'registered') {
               this.roomCode = message.roomCode;
+              this.reconnectionToken = message.reconnectionToken;
               this.isConnected = true;
+
+              // Save the config for future reconnections
+              this.saveConfig();
+
               console.log(`✅ Registered with room code: ${this.roomCode}`);
+              if (message.isReconnection) {
+                console.log(`🔄 Successfully reconnected with same room code!`);
+              }
               resolve(this.roomCode);
             }
 
