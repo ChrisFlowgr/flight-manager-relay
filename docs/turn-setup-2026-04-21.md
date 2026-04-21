@@ -85,15 +85,62 @@ USE_RELAY=true
 
 ## Exact Google Cloud Test Plan
 
-Use this only for testing TURN:
+Use this only for testing TURN.
+
+You now have two test options:
+
+### Option A: Fastest Test Without Any Domain
+
+Use the Google VM public IP directly.
+
+This is the fastest way to prove whether TURN fixes the black screen.
+
+Use this when:
+
+- you do not have DNS access yet
+- you do not want to buy a domain
+- you want a simple proof test first
+
+Limits of IP-only test mode:
+
+- no TLS on `5349`
+- TURN runs on `3478` using UDP/TCP only
+- good for proof testing, not the best final production setup
+
+### Option B: Domain-Based Test
+
+Use a hostname such as `turn-test.plaz.gr`.
+
+This is closer to final production because it allows TURN over TLS too.
+
+## Exact Google Cloud Test Plan (IP-only)
+
+Use this first if you want the simplest path:
 
 1. Create or log into a Google Cloud account.
 2. Start the Google Cloud free trial if you have never used it before.
 3. Create one project, for example `flightmanager-turn-test`.
 4. Create one Ubuntu VM in a North America region.
 5. Give it one public IPv4 address.
-6. Point a DNS name such as `turn-test.flightmanager.app` to that IP.
-7. Run the setup script in [setup-turn-ubuntu.sh](/C:/Users/Chris%20Flow/Flightmanager/infra/turn/setup-turn-ubuntu.sh).
+6. SSH into that VM.
+7. Run the TURN setup script in IP-only mode.
+8. Set `TURN_PUBLIC_HOST` on Render to the VM public IP.
+9. Set `TURN_ENABLE_TLS=false` on Render.
+10. Redeploy the relay service.
+11. Restart the Windows host.
+12. Test remote watch again from the same failing phone/network path.
+
+## Exact Google Cloud Test Plan (With Domain)
+
+Use this only if you have working DNS access and want TLS too:
+
+1. Create or log into a Google Cloud account.
+2. Start the Google Cloud free trial if you have never used it before.
+3. Create one project, for example `flightmanager-turn-test`.
+4. Create one Ubuntu VM in a North America region.
+5. Give it one public IPv4 address.
+6. Point a DNS name such as `turn-test.plaz.gr` to that IP.
+7. Run the setup script in domain mode.
 8. Put the same shared secret into Render environment variables.
 9. Redeploy the relay service.
 10. Restart the Windows host.
@@ -138,6 +185,40 @@ Avoid it unless we truly need automation.
 
 ## What You Need To Prepare Before Google Test
 
+### IP-only Google test mode
+
+Prepare these exact values:
+
+- `TURN_SHARED_SECRET`
+- `TURN_PUBLIC_IP`
+- `TURN_PUBLIC_HOST`
+- `TURN_ENABLE_TLS=false`
+
+Example:
+
+```bash
+export TURN_SHARED_SECRET=replace-with-a-long-random-secret
+export TURN_PUBLIC_IP=203.0.113.10
+export TURN_PUBLIC_HOST=203.0.113.10
+export TURN_ENABLE_TLS=false
+sudo -E bash setup-turn-ubuntu.sh
+```
+
+Then set these on Render:
+
+```env
+TURN_SHARED_SECRET=replace-with-a-long-random-secret
+TURN_PUBLIC_HOST=203.0.113.10
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_CREDENTIAL_TTL_SECONDS=600
+TURN_ENABLE_UDP=true
+TURN_ENABLE_TCP=true
+TURN_ENABLE_TLS=false
+```
+
+### Domain-based mode
+
 Prepare these exact values:
 
 - `TURN_DOMAIN`
@@ -176,11 +257,14 @@ It will:
 ## Ports To Open On The TURN VM
 
 - `22/tcp` for SSH
-- `80/tcp` for the first Let's Encrypt certificate request
 - `3478/udp`
 - `3478/tcp`
-- `5349/tcp`
 - `49160-49200/udp`
+
+Add these too only when TLS is enabled:
+
+- `80/tcp` for the first Let's Encrypt certificate request
+- `5349/tcp`
 
 The extra UDP range is required for the relayed media packets.
 
