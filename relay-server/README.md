@@ -37,7 +37,22 @@ This relay server enables remote connections between Flight Simulator PCs and mo
 
 ## Environment Variables
 
-No environment variables needed! The server uses `PORT` provided by the hosting platform.
+Minimum:
+
+- `PORT` - Server port (usually provided by the hosting platform)
+
+Recommended for production remote video:
+
+- `TURN_SHARED_SECRET` - Shared secret used for Coturn REST credentials
+- `TURN_PUBLIC_HOST` - Public TURN hostname users connect to
+- `TURN_PORT` - TURN/STUN port, usually `3478`
+- `TURN_TLS_PORT` - TURN over TLS port, usually `5349`
+- `TURN_CREDENTIAL_TTL_SECONDS` - Credential lifetime in seconds, default `600`
+- `TURN_ENABLE_UDP` - `true` by default
+- `TURN_ENABLE_TCP` - `true` by default
+- `TURN_ENABLE_TLS` - `true` by default
+
+Without TURN configured, the relay still supports pairing, telemetry, and controls, but remote video remains direct-only and can fail on many networks.
 
 ## Testing Locally
 
@@ -51,6 +66,8 @@ Server runs on http://localhost:3000
 ## API Endpoints
 
 - `GET /health` - Health check
+- `GET /session/:token` - Session lookup by reconnection token
+- `GET /turn-credentials` - Issues short-lived TURN credentials for remote media
 - `GET /rooms` - List active rooms (for debugging)
 - WebSocket endpoint at `/`
 
@@ -93,6 +110,7 @@ Response:
 - Rooms are automatically deleted when PC disconnects
 - Only one mobile device per room
 - No data is stored - purely a relay
+- TURN credentials are short-lived and derived from the relay session token
 
 ## Scaling
 
